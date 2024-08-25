@@ -1,0 +1,27 @@
+{
+  "name": "email-service",
+  "version": "1.0.0",
+  "description": "Service used for sending email and SMS",
+  "main": "index.js",
+  "dependencies": {
+    "aws-sdk": "^2.1680.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "htmlparser2": "^9.1.0",
+    "sanitize-html": "^2.13.0",
+    "validator": "^13.12.0",
+    "winston": "^3.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "prettier": "^3.3.3"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,css,md}\""
+  },
+  "author": "jaypcavitana@gmail.com",
+  "license": "ISC"
+}
