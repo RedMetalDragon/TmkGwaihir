@@ -21,6 +21,7 @@ const sendEmail = async (req, res) => {
       Subject: { Data: subject },
     },
   };
+/* The code block provided is a try-catch statement in JavaScript. Here's what it does: */
 
   try {
     await ses.sendEmail(params).promise();
