@@ -24,8 +24,9 @@ cd email-service
 
 ### 2. Install Dependencies
 
+### To ensure consistency across versions of npm and Node.js, use the following command:
 ```bash
-npm install
+npm ci
 ```
 
 ### 3. Set Up Environment Variables
