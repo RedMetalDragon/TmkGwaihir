@@ -85,7 +85,7 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         context: .
-        file: Dockerfile.prod
+        file: Dockerfile
         platforms: linux/amd64,linux/arm64  # Specify the platforms
         push: true
         tags: |
