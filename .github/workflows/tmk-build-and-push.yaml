@@ -3,7 +3,7 @@ name: Build and Push Docker image using staging environment
 on:
   push:
     tags:
-      - 'v*'  # Push events to matching v*, i.e. v1.0.0, v20.15.10
+      - 'v*' # Push events to matching v*, i.e. v1.0.0, v20.15.10
   workflow_dispatch:
     inputs:
       branch:
@@ -18,79 +18,123 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.inputs.branch || github.ref }}
-    
-    - name: Validate branch and Tag
-      id: check-condition
-      run: |
-        echo "Ref: $GITHUB_REF"
-        # Assuming GITHUB_REF could be a tag based on the event
-        if [[ "$GITHUB_REF" =~ refs/tags/v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-          echo "Valid semantic version tag"
-          echo "proceed=true" >> $GITHUB_ENV
-        elif [[ "$GITHUB_REF" =~ ^refs/heads/release/staging.* ]]; then
-          echo "Valid branch detected but not the tag version, check it"
-          echo "proceed=false" >> $GITHUB_ENV
-        else
-          echo "Invalid or no semantic version tag"
-          echo "proceed=true" >> $GITHUB_ENV
-        fi
-    
-    - name: Extract image tag
-      if: env.proceed == 'true'
-      run:  |
-        if [[ "$GITHUB_REF" =~ ^refs/tags/(.+)$ ]]; then
-          TAG=${BASH_REMATCH[1]}
-          echo "Extracted tag: $TAG"
-        else
-          #TAG=${GITHUB_SHA}  # Fallback to commit SHA if not a tag
-          echo "No tag found"
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Validate branch and Tag
+        id: check-condition
+        run: |
+          echo "Ref: $GITHUB_REF"
+          # Assuming GITHUB_REF could be a tag based on the event
+          if [[ "$GITHUB_REF" =~ refs/tags/v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "Valid semantic version tag"
+            echo "proceed=true" >> $GITHUB_ENV
+          elif [[ "$GITHUB_REF" =~ ^refs/heads/release/staging.* ]]; then
+            echo "Valid branch detected but not the tag version, check it"
+            echo "proceed=false" >> $GITHUB_ENV
+          else
+            echo "Invalid or no semantic version tag"
+            echo "proceed=true" >> $GITHUB_ENV
+          fi
+
+      - name: Extract image tag
+        if: env.proceed == 'true'
+        run: |
+          if [[ "$GITHUB_REF" =~ ^refs/tags/(.+)$ ]]; then
+            TAG=${BASH_REMATCH[1]}
+            echo "Extracted tag: $TAG"
+          else
+            #TAG=${GITHUB_SHA}  # Fallback to commit SHA if not a tag
+            echo "No tag found"
+            exit 1
+          fi
+          echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
+          echo "${{ github.ref }}" > tmk_brain_latest_image_tag.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmk_gwaihir_latest_image_tag
+          path: tmk_gwaihir_latest_image_tag.txt
+
+      - name: Bridge workflow
+        if: env.proceed == 'false'
+        run: |
+          echo "Skipping the workflow"
           exit 1
-        fi
-        echo "IMAGE_TAG=$TAG" >> $GITHUB_ENV
-        echo "${{ github.ref }}" > tmk_brain_latest_image_tag.txt
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v2
-      with:
-        name: tmk_gwaihir_latest_image_tag
-        path: tmk_gwaihir_latest_image_tag.txt
+      - name: Set up QEMU
+        if: env.proceed == 'true'
+        uses: docker/setup-qemu-action@v1
 
-    - name: Bridge workflow
-      if: env.proceed == 'false'
-      run:  |
-        echo "Skipping the workflow"
-        exit 1
+      - name: Set up Docker Buildx
+        if: env.proceed == 'true'
+        uses: docker/setup-buildx-action@v1
 
-    - name: Set up QEMU
-      if: env.proceed == 'true'
-      uses: docker/setup-qemu-action@v1
+      - name: Login to DockerHub
+        if: env.proceed == 'true'
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    - name: Set up Docker Buildx
-      if: env.proceed == 'true'
-      uses: docker/setup-buildx-action@v1
+      - name: Build and push multi-arch image
+        if: env.proceed == 'true'
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64 # Specify the platforms
+          push: true
+          tags: |
+            marcoguerod/tmkgwaihir:${{ github.event.inputs.tag || env.IMAGE_TAG }}
 
-    - name: Login to DockerHub
-      if: env.proceed == 'true'
-      uses: docker/login-action@v1
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Logout from Docker
+        if: steps.check-condition.outputs.proceed == 'true'
+        run: docker logout
 
-    - name: Build and push multi-arch image
-      if: env.proceed == 'true'
-      uses: docker/build-push-action@v2
-      with:
-        context: .
-        file: Dockerfile
-        platforms: linux/amd64,linux/arm64  # Specify the platforms
-        push: true
-        tags: |
-          marcoguerod/tmkgwaihir:${{ github.event.inputs.tag || env.IMAGE_TAG }}
+  update-lambda:
+    name: Update Lambda function
+    needs: build-and-push
+    environment: staging
+    runs-on: ubuntu-latest
 
-    - name: Logout from Docker
-      if: steps.check-condition.outputs.proceed == 'true'
-      run: docker logout
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Install AWS CLI
+        run: sudo apt-get install awscli -y
+
+      - name: Define payload
+        env:
+          FUNCTION_KEY: ${{ secrets.LAMBDA_FUNCTION_KEY }}
+        run: |
+          cat <<EOF > payload.json
+          {
+          "httpMethod": "POST",
+          "path": "/submit-tag",
+          "headers": {
+            "Authorization": "FunctionKey $FUNCTION_KEY"
+          },
+          "body": "{\"tmk-service-version-tags-vs-staging\": \"tmk-gwaihir\", \"lastBuildTag\": \"${{ github.event.inputs.branch || github.ref }}\"}"
+
+          }
+          EOF
+
+      - name: Invoke Lambda function
+        run: |
+          aws lambda invoke \
+            --function-name tmk-dashboard-staging \
+            --payload file://payload.json \
+            --cli-binary-format raw-in-base64-out \
+            response.json
+          cat response.json  # Show the Lambda response in the logs
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
